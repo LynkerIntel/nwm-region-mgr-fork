@@ -123,9 +123,9 @@ pip install .
 # Install the package in edit mode (for development)
 pip install -e .
 # Install additional dependencies for parameter regionalization
-pip install .[parreg]
+pip install ".[parreg]"
 # Install dependencies for docs and dev
-pip install .[docs,dev]
+pip install ".[docs,dev]"
 ```
 
 ### STEP 1: Run regionalization to produce regionalized parameters and formulations
