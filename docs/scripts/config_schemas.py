@@ -172,6 +172,11 @@ def field_to_dict(field: FieldInfo, value: Any = None, omit_none: bool = True) -
         example = default_value if default_value != "required" else ""
 
     sub_dict = None
+    # True only when sub_dict is keyed by real instance names (e.g. dataset/metric names),
+    # as opposed to a dict[str, BaseModel] field's generic fallback below, which is instead
+    # keyed by the model class's own field names (e.g. 'attr_list', 'attr_data_file') and
+    # would render misleadingly if treated as if each key were a named instance.
+    sub_dict_keyed_by_name = False
 
     # Handle nested BaseModel
     if isinstance(default_value, BaseModel):
@@ -194,20 +199,39 @@ def field_to_dict(field: FieldInfo, value: Any = None, omit_none: bool = True) -
             and issubclass(args[1], BaseModel)
         ):
             value_type = args[1]
-            if isinstance(default_value, dict):
-                # Map examples if provided
-                if isinstance(example, dict):
-                    sub_dict = {
-                        k: pydantic_to_dict(
-                            value_type, value_type, outer_examples=example.get(k)
-                        )
-                        for k in default_value.keys()
+            # Prefer the default's keys (e.g., a non-empty default_factory); for an open
+            # registry field (default {}) with no fixed keys, fall back to the example's
+            # keys so illustrative entries are still documented.
+            if isinstance(default_value, dict) and default_value:
+                keys_source = default_value
+            elif isinstance(example, dict) and example:
+                keys_source = example
+            else:
+                keys_source = None
+
+            if keys_source is not None:
+                sub_dict_keyed_by_name = True
+                # Each key's value must itself be a field-info dict (matching this
+                # function's own return shape), not the raw pydantic_to_dict(...) output --
+                # pydantic_dict_to_lines expects every dict_rep value it recurses into to
+                # have its own 'description'/'type'/'sub_dict' keys, one level further down.
+                sub_dict = {
+                    k: {
+                        "type": value_type,
+                        "description": NO_DESCRIPTION_STR,
+                        "default": None,
+                        "example": example.get(k) if isinstance(example, dict) else None,
+                        "sub_dict": pydantic_to_dict(
+                            value_type,
+                            value_type,
+                            outer_examples=(
+                                example.get(k) if isinstance(example, dict) else None
+                            ),
+                        ),
+                        "sub_dict_keyed_by_name": False,
                     }
-                else:
-                    sub_dict = {
-                        k: pydantic_to_dict(value_type, value_type)
-                        for k in default_value.keys()
-                    }
+                    for k in keys_source.keys()
+                }
             else:
                 sub_dict = pydantic_to_dict(value_type, value_type)
     return {
@@ -216,6 +240,7 @@ def field_to_dict(field: FieldInfo, value: Any = None, omit_none: bool = True) -
         "default": default_value,
         "example": example,
         "sub_dict": sub_dict,
+        "sub_dict_keyed_by_name": sub_dict_keyed_by_name,
     }
 
 
@@ -317,9 +342,13 @@ def pydantic_dict_to_lines(dict_rep: dict, indent: int = 0) -> list[str]:
             else ""
         )
 
-        # If sub_dict exists, recurse except for fields of type dict{str, BaseModel}, so that examples defined in
-        # format of dict{str: BaseModel} are preserved.
-        if v.get("sub_dict") is not None and not is_dict_of_basemodel(v):
+        # If sub_dict exists, recurse -- except for a dict[str, BaseModel] field whose
+        # sub_dict is NOT keyed by real instance names (i.e., it's the generic fallback,
+        # keyed by the model class's own field names instead), since recursing into that
+        # would misleadingly render those field names as if each were a named instance.
+        if v.get("sub_dict") is not None and (
+            not is_dict_of_basemodel(v) or v.get("sub_dict_keyed_by_name")
+        ):
             lines.append(f"{tmp_ind}{k}:{comment}")
             lines.extend(pydantic_dict_to_lines(v["sub_dict"], indent + INDENT_LEVEL))
             continue

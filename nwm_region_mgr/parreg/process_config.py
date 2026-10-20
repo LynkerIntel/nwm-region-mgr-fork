@@ -703,7 +703,7 @@ class ParameterRegionalizationProcessor(BaseConfigProcessor):
         """Dataframe containing all attributes."""
         df_attrs_all = []
         for dataset_name in self.datasets:
-            dataset = getattr(self.config.attr_datasets, dataset_name)
+            dataset = self.config.attr_datasets[dataset_name]
             df_attrs = dataset.get_attr_data()
 
             df_attrs = df_attrs.rename(
@@ -739,7 +739,7 @@ class ParameterRegionalizationProcessor(BaseConfigProcessor):
         """Get the base attribute list from all datasets."""
         base_attr_list = []
         for dataset_name in self.datasets:
-            attrs = getattr(self.config.attr_datasets, dataset_name).base_attr_list
+            attrs = self.config.attr_datasets[dataset_name].base_attr_list
             if attrs is not None:
                 base_attr_list.extend([dataset_name + "_" + x for x in attrs])
 

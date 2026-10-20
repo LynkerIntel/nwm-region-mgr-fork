@@ -42,7 +42,7 @@ def plot_missing_attr_counts(
     cols = []
     for dataset in config.general.attr_dataset_list:
         cols = cols + [
-            dataset + "_" + x for x in getattr(config.attr_datasets, dataset).attr_list
+            dataset + "_" + x for x in config.attr_datasets[dataset].attr_list
         ]
 
     missing_cols = set(cols) - set(df_attrs_all.columns)

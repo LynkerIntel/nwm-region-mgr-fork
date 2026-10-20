@@ -4,7 +4,8 @@ Classes:
     - GeneralConfig: General configuration settings specific to parameter regionalization.
     - DonorConfig: Configuration for donor selection.
     - AttrDatasetConfig: Configuration for attribute datasets used in the regionalization process.
-    - AvailableAttrsConfig: Configuration for available attribute datasets for use in the regionalization process.
+    - AvailableAttrsConfig: Reference catalog documenting the attribute datasets bundled as examples
+      with this package (not the enforced type of Config.attr_datasets, which accepts any dataset name).
     - SnowCoverConfig: Configuration for snow cover data.
     - AlgorithmConfig: Algorithm configuration class.
     - ParameterOutputConfig: Configuration for parameter regionalization output.
@@ -32,8 +33,14 @@ logger = logging.getLogger(__name__)
 class GeneralConfig(BaseGeneralConfig):
     """General configuration settings specific to parameter regionalization."""
 
-    attr_dataset_list: List[Literal["ngen", "hlr", "streamcat", "hydroatlas"]] = Field(
-        description="List of attribute dataset names to use. Valid options include 'ngen', 'hlr', 'streamcat', 'hydroatlas'.",
+    attr_dataset_list: List[str] = Field(
+        description=(
+            "List of attribute dataset names to use. Each name must have a matching entry under "
+            "'attr_datasets'. This package ships example configurations for 'ngen', 'hlr', "
+            "'streamcat', and 'hydroatlas' (see AvailableAttrsConfig for their schemas/sources), "
+            "but any dataset name may be used, e.g. to add a dataset specific to a different "
+            "hydrofabric."
+        ),
         examples=["ngen", "streamcat"],
         default=["ngen"],
     )
@@ -338,7 +345,14 @@ class AttrDatasetConfig(BaseModel):
 
 
 class AvailableAttrsConfig(BaseModel):
-    """Configuration for available attribute datasets for use in the regionalization process."""
+    """Reference catalog of the attribute datasets bundled as examples with this package.
+
+    This class is not used to validate `Config.attr_datasets` directly -- that field accepts
+    any `Dict[str, AttrDatasetConfig]`, so datasets with other names (e.g. specific to a
+    different hydrofabric) may also be used. This class exists purely to document the schema,
+    source, and example configuration of the four datasets bundled with this package: NGEN,
+    HLR, StreamCat, and HydroATLAS.
+    """
 
     ngen: AttrDatasetConfig = Field(
         description=(
@@ -806,9 +820,41 @@ class Config(BaseConfig):
         description="Configuration for donor selection.",
         default_factory=DonorConfig,
     )
-    attr_datasets: AvailableAttrsConfig = Field(
-        description="Configuration for attribute datasets available for use in regionalization.",
-        default_factory=AvailableAttrsConfig,
+    attr_datasets: Dict[str, AttrDatasetConfig] = Field(
+        description=(
+            "Attribute dataset configurations available for use in regionalization, keyed by "
+            "dataset name. Only datasets referenced in 'general.attr_dataset_list' need to be "
+            "defined here. Dataset names are arbitrary; this package bundles examples for "
+            "'ngen', 'hlr', 'streamcat', and 'hydroatlas' (see AvailableAttrsConfig), but "
+            "datasets specific to a different hydrofabric may be added under any name."
+        ),
+        examples={
+            "ngen": {
+                "attr_list": None,
+                "attr_select_file": "{static_data_dir}/inputs/attr_config/attr_selection_ngen.csv",
+                "attr_data_file": "{static_data_dir}/inputs/attr_datasets/ngen/attr_ngen_{domain}.parquet",
+                "base_attr_list": ["elevation", "slope", "aspect"],
+            },
+            "hlr": {
+                "attr_list": None,
+                "attr_select_file": "{static_data_dir}/inputs/attr_config/attr_selection_hlr.csv",
+                "attr_data_file": "{static_data_dir}/inputs/attr_datasets/hlr/attr_hlr_{domain}.parquet",
+                "base_attr_list": ["PPT", "SAND"],
+            },
+            "streamcat": {
+                "attr_list": None,
+                "attr_select_file": "{static_data_dir}/inputs/attr_config/attr_selection_streamcat.csv",
+                "attr_data_file": "{static_data_dir}/inputs/attr_datasets/streamcat/attr_streamcat_{domain}.parquet",
+                "base_attr_list": ["Precip_Minus_EVT", "Elev", "BFI"],
+            },
+            "hydroatlas": {
+                "attr_list": None,
+                "attr_select_file": "{static_data_dir}/inputs/attr_config/attr_selection_hydroatlas.csv",
+                "attr_data_file": "{static_data_dir}/inputs/attr_datasets/hydroatlas/attr_hydroatlas_{domain}.parquet",
+                "base_attr_list": ["ele_mt_sav", "dis_m3_pyr", "run_mm_syr", "pre_mm_syr"],
+            },
+        },
+        default_factory=dict,
     )
     snow_cover: SnowCoverConfig = Field(
         description="Configuration for snow cover data to be used in determining whether catchments are snow-driven.",
@@ -846,7 +892,7 @@ class Config(BaseConfig):
     def check_required_attr_datasets_present(self):
         """Check that the required attributes are present."""
         required = set(self.general.attr_dataset_list)
-        defined = set(self.attr_datasets.model_dump(exclude_unset=True).keys())
+        defined = set(self.attr_datasets.keys())
 
         missing = required - defined
         if missing:
