@@ -3,6 +3,7 @@
 process_config.py
 
 Functions:
+    - validate_files: Validate config files/columns, plus eagerly validate attribute datasets.
     - run_parreg_for_vpu: Run the parameter regionalization process for a given VPU.
     - set_vpu: Set the VPU for processing.
     - get_donors_receivers: Get the donors and receivers for a given VPU from the config.
@@ -72,6 +73,34 @@ logger = logging.getLogger(__name__)
 
 class ParameterRegionalizationProcessor(BaseConfigProcessor):
     """Regionalization Processor."""
+
+    def validate_files(self):
+        """Validate config files/columns, plus eagerly validate referenced attribute datasets.
+
+        AttrDatasetConfig.validate_schema() performs the same checks get_attr_data() does, but
+        without reading the full attribute data, so a bad dataset config is caught here at
+        config-load time instead of partway through a VPU's processing.
+
+        Runs before super().validate_files(), not after: validate_schema() resolves each
+        dataset's attr_list in place (from attr_select_file, if that's how it's configured),
+        and super().validate_files() saves the "final configuration" YAML as the last step of
+        its own body. Validating first means that saved file reflects the attr_list actually
+        used, instead of showing it unresolved (e.g. null) for any dataset configured via
+        attr_select_file rather than a literal attr_list.
+        """
+        for dataset_name in self.config.general.attr_dataset_list:
+            dataset = self.config.attr_datasets.get(dataset_name)
+            if dataset is None:
+                continue  # already reported by Config.check_required_attr_datasets_present
+            try:
+                dataset.validate_schema()
+            except Exception as e:
+                raise ValueError(
+                    f"Attribute dataset '{dataset_name}' (general.attr_dataset_list) failed "
+                    f"validation: {e}"
+                ) from e
+
+        super().validate_files()
 
     def set_vpu(self, vpu: str):
         """Set the vpu."""

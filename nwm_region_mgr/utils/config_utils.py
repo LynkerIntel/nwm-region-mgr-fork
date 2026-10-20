@@ -14,6 +14,8 @@ Classes/Functions:
     - load_and_process_config: Load, validate, process, and save the configuration files.
     - _validate_paths: Validate that all file and directory paths exist.
     - _assemble_file_paths: Assemble file paths from the configuration.
+    - _log_hydrofabric_config_summary: Log the resolved hydrofabric_profile/id_col/layer_name
+      this run will use, before any file/column validation runs.
     - _required_columns_calval_stats: Return a set of required columns for calibration/validation statistics.
     - _file_required_column_map: Return a dictionary mapping files to required columns.
     - PydanticDictLike: Stand-in for dictionary-like behavior when you want specificity of a pydantic model.
@@ -1133,8 +1135,29 @@ class BaseConfigProcessor:
 
         return config
 
+    def _log_hydrofabric_config_summary(self) -> None:
+        """Log the resolved hydrofabric schema conventions this run will use.
+
+        Surfaces the active hydrofabric_profile (if any) and the resolved id_col/layer_name/
+        domain/vpu up front, so a later missing-column or layer-not-found error can be traced
+        back to where its expected name came from without re-reading the saved final config.
+        """
+        general = self.config.general
+        profile = getattr(general, "hydrofabric_profile", None)
+        logger.info(
+            "Hydrofabric config for this run -- profile: %s, domain/vpu: %s/%s, id_col: %s, "
+            "layer_name: %s",
+            profile or "(none; using built-in defaults)",
+            general.domain,
+            general.vpu,
+            general.id_col.as_dict,
+            general.layer_name.as_dict,
+        )
+
     def validate_files(self):
         """Validate that all file paths exist and required columns are present in the files."""
+        self._log_hydrofabric_config_summary()
+
         # Assemble file paths from the configuration
         paths = self._assemble_file_paths(self.config, exclude={"formulation_file"})
         logger.debug("Input file paths from configuration: %s", paths)

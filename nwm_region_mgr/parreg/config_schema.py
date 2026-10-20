@@ -30,6 +30,36 @@ from nwm_region_mgr.utils import (
 logger = logging.getLogger(__name__)
 
 
+def _get_attr_data_columns(file_path: Path) -> List[str]:
+    """Return the column names of an attribute data file, without reading its full data.
+
+    Supports the same formats as read_table (CSV/TSV/Parquet), matching AttrDatasetConfig's
+    own get_attr_data(), which is not limited to Parquet. For Parquet, only the file's schema
+    metadata is read; for CSV/TSV, only the header row is read (nrows=0).
+
+    Args:
+        file_path: Path to the attribute data file.
+
+    Returns:
+        List of column names present in the file.
+
+    Raises:
+        ValueError: If the file format is not supported.
+
+    """
+    suffix = file_path.suffix.lower()
+    if suffix == ".parquet":
+        return pq.ParquetFile(file_path).schema.names
+    elif suffix in (".csv", ".tsv", ".txt"):
+        sep = "\t" if suffix == ".tsv" else None
+        return pd.read_csv(file_path, sep=sep, engine="python", nrows=0).columns.tolist()
+    else:
+        raise ValueError(
+            f"Unsupported file format for attribute data: '{suffix}' ({file_path}). "
+            "Supported formats are .csv, .tsv, .txt, and .parquet."
+        )
+
+
 class GeneralConfig(BaseGeneralConfig):
     """General configuration settings specific to parameter regionalization."""
 
@@ -282,6 +312,9 @@ class AttrDatasetConfig(BaseModel):
 
     def _get_selected_attrs(self):
         """Private method to load the list of selected attributes."""
+        if not self.attr_data_file:
+            raise FileNotFoundError("No attr_data_file provided.")
+
         # determine list of attributes to use from either attr_list or attr_select_file
         # if both are provided, attr_list takes priority
         if not self.attr_list:
@@ -301,10 +334,14 @@ class AttrDatasetConfig(BaseModel):
             self.attr_list = df_attrs[df_attrs["select"] == 1]["attr_name"].to_list()
 
         # check if attrs in attr_list are present in the attr_data_file
+        attr_data_path = Path(self.attr_data_file)
+        if not attr_data_path.exists():
+            raise FileNotFoundError(
+                f"Attribute data file not found: {self.attr_data_file}"
+            )
+
         attrs1 = [
-            x
-            for x in self.attr_list
-            if x not in pq.ParquetFile(self.attr_data_file).schema.names
+            x for x in self.attr_list if x not in _get_attr_data_columns(attr_data_path)
         ]
         if attrs1:
             msg = f"The following attributes are not found in {self.attr_data_file} and will be ignored: {attrs1}"
@@ -323,19 +360,23 @@ class AttrDatasetConfig(BaseModel):
             logger.error(msg)
             raise ValueError(msg)
 
-    def get_attr_data(self, id_name: str = "div_id") -> pd.DataFrame:
-        """Load attribute data filtered by selected attributes."""
+    def validate_schema(self) -> None:
+        """Eagerly validate this dataset's configuration against its files.
+
+        Resolves attr_list (from attr_select_file, if needed) and checks it against
+        attr_data_file's schema, exactly as get_attr_data() does -- but only reads
+        attr_data_file's parquet metadata, not the full attribute data, so a missing file,
+        bad attr_select_file, or unmatched attr_list can be caught cheaply and early (e.g.,
+        at config-load time) rather than partway through a VPU's processing.
+        """
         self._get_selected_attrs()
 
-        if not self.attr_data_file:
-            raise FileNotFoundError("No attr_data_file provided.")
+    def get_attr_data(self, id_name: str = "div_id") -> pd.DataFrame:
+        """Load attribute data filtered by selected attributes."""
+        # _get_selected_attrs already confirms attr_data_file is set and exists
+        self._get_selected_attrs()
 
-        attr_data_path = Path(self.attr_data_file)
-        if not attr_data_path.exists():
-            raise FileNotFoundError(
-                f"Attribute data file not found: {self.attr_data_file}"
-            )
-        df_data = read_table(attr_data_path)
+        df_data = read_table(Path(self.attr_data_file))
 
         missing_cols = set(self.attr_list) - set(df_data.columns)
         if missing_cols:
