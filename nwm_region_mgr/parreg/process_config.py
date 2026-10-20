@@ -149,9 +149,9 @@ class ParameterRegionalizationProcessor(BaseConfigProcessor):
             raise ValueError(
                 f"Donor gage file must contain 'longitude' and 'latitude' columns: {gage_file}"
             )
-        if "gage_id" not in donors.columns:
+        if self.gage_col not in donors.columns:
             raise ValueError(
-                f"Donor gage file must contain 'gage_id' column: {gage_file}"
+                f"Donor gage file must contain '{self.gage_col}' column: {gage_file}"
             )
 
         # validate coordinates (skip NaNs)
@@ -186,7 +186,8 @@ class ParameterRegionalizationProcessor(BaseConfigProcessor):
     def hydrofabric_gdf(self) -> gpd.GeoDataFrame:
         """Hydrofabric geodataframe with only valid geometries."""
         gdf = gpd.read_file(
-            self.config.general.ngen_hydrofabric_file[self.vpu], layer="divides"
+            self.config.general.ngen_hydrofabric_file[self.vpu],
+            layer=getattr(self.config.general.layer_name, "ngen", "divides"),
         )
         gdf[self.div_col] = gdf[self.div_col].astype("string")
 
@@ -254,7 +255,7 @@ class ParameterRegionalizationProcessor(BaseConfigProcessor):
         # Find donors in the buffered VPU
         donor_basins = self.donor_gdf_3857[
             self.donor_gdf_3857.geometry.within(self.hydrofabric_buffered_polygon)
-        ]["gage_id"].tolist()
+        ][self.gage_col].tolist()
 
         if not donor_basins:
             logger.warning(
@@ -363,7 +364,7 @@ class ParameterRegionalizationProcessor(BaseConfigProcessor):
         """Determine the VPUs of the donor basins."""
         df_cwt = self.gage_crosswalk
         return (
-            df_cwt[df_cwt["gage_id"].isin(self.donor_basins)]["vpu_id"]
+            df_cwt[df_cwt[self.gage_col].isin(self.donor_basins)][self.vpu_col]
             .unique()
             .tolist()
         )
@@ -400,8 +401,8 @@ class ParameterRegionalizationProcessor(BaseConfigProcessor):
         )
 
         # filter by vpu
-        if "vpu_id" in df_cwt.columns:
-            df_cwt = df_cwt[df_cwt["vpu_id"] == vpu]
+        if self.vpu_col in df_cwt.columns:
+            df_cwt = df_cwt[df_cwt[self.vpu_col] == vpu]
             donors = df_cwt[self.gage_col].unique().tolist()
 
             # further filter donors to those that are in the donor_basins_all list
@@ -419,7 +420,8 @@ class ParameterRegionalizationProcessor(BaseConfigProcessor):
             )
         else:
             raise ValueError(
-                f"Column 'vpu_id' not found in {self.config.general.gage_divide_cwt_file}. Cannot filter by VPU."
+                f"Column '{self.vpu_col}' not found in {self.config.general.gage_divide_cwt_file}. "
+                "Cannot filter by VPU."
             )
 
         if not donors:

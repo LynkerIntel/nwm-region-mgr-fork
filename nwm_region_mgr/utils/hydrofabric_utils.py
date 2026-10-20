@@ -22,6 +22,7 @@ def find_gages_within_buffer(
     gdf: gpd.GeoDataFrame = None,
     hydrofabric_file: Path = None,
     id: str = None,
+    layer: str = "divides",
 ) -> tuple[list, list, gpd.GeoSeries]:
     """Find gages within a buffer zone around the hydrofabric.
 
@@ -32,6 +33,9 @@ def find_gages_within_buffer(
         gdf: optional, a GeoDataFrame of hydrofabric polygons (if provided, hydrofabric_file is ignored)
         hydrofabric_file: optional, path to the hydrofabric file (.gpkg or .shp format)
         id: optional, identifier for the hydrofabric
+        layer: layer name to read from hydrofabric_file when it is a GeoPackage (ignored for .shp or
+            when gdf is provided). Defaults to "divides"; callers should pass the layer name configured
+            for their hydrofabric dataset (e.g., config.general.layer_name.ngen).
 
 
     Returns:
@@ -65,8 +69,8 @@ def find_gages_within_buffer(
 
         # read the hydrofabric file
         if hydrofabric_file.suffix.lower() == ".gpkg":
-            # For GeoPackage files, read the 'divides' layer
-            gdf = gpd.read_file(hydrofabric_file, layer="divides")
+            # For GeoPackage files, read the configured divides layer
+            gdf = gpd.read_file(hydrofabric_file, layer=layer)
         elif hydrofabric_file.suffix.lower() == ".shp":
             # For Shapefile, read the file directly
             gdf = gpd.read_file(hydrofabric_file)

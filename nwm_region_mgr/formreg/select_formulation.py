@@ -42,19 +42,21 @@ logger = logging.getLogger(__name__)
 def _get_gages_with_shared_formulations(
     df: pd.DataFrame,
     min_gages: int = 3,
+    gage_col: str = "gage_id",
 ) -> Tuple[bool, List[str], List[str]]:
     """Identify the largest formulation set shared by at least `min_gages` gages.
 
     Args:
-        df (pd.DataFrame): Must contain 'gage_id' and 'formulation' columns.
+        df (pd.DataFrame): Must contain `gage_col` and 'formulation' columns.
         min_gages (int): Minimum number of gages that must share the same formulations.
+        gage_col (str): Column name for gage ID in `df`.
 
     Returns:
         (True, [gages], [shared_formulations]) if found, else (False, [], [])
 
     """
-    # Build mapping from gage_id -> set of formulations
-    gage_to_formulations = df.groupby("gage_id")["formulation"].apply(
+    # Build mapping from gage ID -> set of formulations
+    gage_to_formulations = df.groupby(gage_col)["formulation"].apply(
         lambda x: frozenset(x)
     )
 
@@ -135,7 +137,7 @@ def _find_gages_nearest_neighbor(
         found_gages = False
         if len(gages) >= min_gages:
             found_gages, gages, formulations = _get_gages_with_shared_formulations(
-                df[df[gage_col].isin(gages)], min_gages=min_gages
+                df[df[gage_col].isin(gages)], min_gages=min_gages, gage_col=gage_col
             )
 
         # if no gages are found, increase the buffer size and try again
@@ -211,7 +213,7 @@ def _find_gages_upscaling(
         # if there are enough gages, check if they share the same formulations
         if ngage >= min_gages:
             found_gages, gages, formulations = _get_gages_with_shared_formulations(
-                df[df[gage_col].isin(gages)], min_gages=min_gages
+                df[df[gage_col].isin(gages)], min_gages=min_gages, gage_col=gage_col
             )
 
             if not found_gages:
@@ -270,7 +272,7 @@ def _find_calibration_gages(
 
     if len(gages0) >= nmin_gages:
         found_gages, gages0, formulations = _get_gages_with_shared_formulations(
-            df[df[gage_col].isin(gages0)], min_gages=nmin_gages
+            df[df[gage_col].isin(gages0)], min_gages=nmin_gages, gage_col=gage_col
         )
 
     # if there are enough gages at the current huc_id level, return them

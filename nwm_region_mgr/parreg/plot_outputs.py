@@ -163,8 +163,8 @@ def plot_donor_spatial_map(
     ring_gdf.plot(ax=ax, facecolor="lightgray", edgecolor="black")
 
     # donor and non-donor calibration basins in the buffered VPU
-    non_donor_gdf = donor_gdf[~donor_gdf["gage_id"].isin(final_donor_basins)]
-    final_donor_gdf = donor_gdf[donor_gdf["gage_id"].isin(final_donor_basins)]
+    non_donor_gdf = donor_gdf[~donor_gdf[gage_col].isin(final_donor_basins)]
+    final_donor_gdf = donor_gdf[donor_gdf[gage_col].isin(final_donor_basins)]
 
     # plot calibration basins in the buffered VPU
     if not donors_only:
