@@ -133,7 +133,13 @@ class FormulationSpatialUnitConfig(BaseModel):
             "USGS HUC level used for spatial discretization (e.g., 'huc8'). "
             "Valid options are HUC2, HUC4, HUC6, HUC8, HUC10, and HUC12."
             "A single formulation is selected per spatial unit given the spatial discretization level. "
-            "Accepted formats: 'huc8', 'HUC8', 'huc-8'."
+            "Accepted formats: 'huc8', 'HUC8', 'huc-8'. "
+            "Any level coarser than 'huc12' is derived by truncating the 'huc12' id column "
+            "(general.id_col.huc12) to that many leading digits, which requires that column to "
+            "hold nested 12-digit numeric HUC codes (the USGS Watershed Boundary Dataset "
+            "convention). For a hydrofabric that does not use nested HUC-style IDs, map "
+            "general.id_col.huc12 to that hydrofabric's own atomic spatial-unit ID and set "
+            "huc_level='huc12' so no truncation happens."
         ),
         examples="huc8",
         default="huc8",
@@ -148,8 +154,10 @@ class FormulationSpatialUnitConfig(BaseModel):
     basin_fill_method: Literal["upscaling", "nearest-neighbor"] = Field(
         description=(
             "Method to handle spatial units with too few calibration basins. Options: "
-            "'upscaling' (by upscaling to a coarser spatial unit), and "
-            "'nearest-neighbor' (by pooling basins from neighboring units)."
+            "'upscaling' (by upscaling to a coarser spatial unit; requires general.id_col.huc12 "
+            "to hold nested numeric HUC codes, see huc_level), and 'nearest-neighbor' (by "
+            "pooling basins from neighboring units using donor gage coordinates; works for any "
+            "hydrofabric and does not require nested IDs)."
         ),
         examples="upscaling",
         default="upscaling",

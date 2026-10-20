@@ -1,6 +1,7 @@
 """utils package with various utility/helper functions."""
 
 from nwm_region_mgr.utils.config_utils import (
+    DEFAULT_VALID_VPUS,
     BaseConfig,
     BaseConfigProcessor,
     BaseGeneralConfig,
@@ -45,6 +46,7 @@ __all__ = [
     "LoggingConfig",
     "FieldCrosswalk",
     "LayerCrosswalk",
+    "DEFAULT_VALID_VPUS",
     "HYDROFABRIC_PROFILES",
     "get_profile",
     "remove_nulls",

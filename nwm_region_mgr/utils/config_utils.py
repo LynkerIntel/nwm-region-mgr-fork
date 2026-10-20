@@ -49,6 +49,19 @@ from nwm_region_mgr.utils.validation_utils import (
 
 logger = logging.getLogger(__name__)
 
+# Built-in mapping of domain name -> valid VPU codes for this package's known NWM domains.
+# Override or extend via BaseGeneralConfig.valid_vpus (directly, or seeded by a hydrofabric
+# profile's "valid_vpus" section) to support a different domain/partitioning scheme.
+DEFAULT_VALID_VPUS: Dict[str, List[str]] = {
+    "conus": [
+        "01", "02", "03N", "03S", "03W", "04", "05", "06", "07", "08", "09",
+        "10L", "10U", "11", "12", "13", "14", "15", "16", "17", "18",
+    ],  # fmt: skip
+    "ak": ["19"],
+    "hi": ["20"],
+    "prvi": ["21"],
+}
+
 
 class LoggingConfig(BaseModel):
     """Logging configuration for the application."""
@@ -167,8 +180,14 @@ class BaseGeneralConfig(BaseModel):
         default="test",
     )
 
-    domain: Literal["conus", "ak", "hi", "prvi"] = Field(
-        description="Which National Water Model Domain this run uses.",
+    domain: str = Field(
+        description=(
+            "Which National Water Model Domain this run uses. Built-in options are 'conus', "
+            "'ak', 'hi', 'prvi', each with a built-in list of valid VPU codes (see "
+            "DEFAULT_VALID_VPUS). A different domain name may be used (e.g., for a hydrofabric "
+            "with its own partitioning scheme), as long as a matching entry is supplied via "
+            "'valid_vpus'."
+        ),
         examples="conus",
         default="conus",
     )
@@ -181,6 +200,19 @@ class BaseGeneralConfig(BaseModel):
         ),
         examples="03S",
         default="03S",
+    )
+
+    valid_vpus: Dict[str, List[str]] | None = Field(
+        description=(
+            "Optional extension of the mapping from domain name to its list of valid VPU codes. "
+            "For a domain name also present in the built-in DEFAULT_VALID_VPUS mapping, codes "
+            "listed here are added to (not a replacement for) that domain's built-in codes; "
+            "domains not listed here are unaffected. Set this to add a VPU code to a known "
+            "domain, or to use an entirely new domain name/partitioning scheme not already "
+            "known to this package (e.g., for a hydrofabric that isn't tiled using NWM VPUs)."
+        ),
+        examples={"gl": ["22", "23"]},
+        default=None,
     )
 
     n_procs: int = Field(
@@ -307,10 +339,11 @@ class BaseGeneralConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def apply_hydrofabric_profile(cls, values: Any) -> Any:
-        """Seed 'id_col'/'layer_name' defaults from a named 'hydrofabric_profile', if set.
+        """Seed 'id_col'/'layer_name'/'valid_vpus' defaults from a 'hydrofabric_profile', if set.
 
         Only keys the user did not already specify are filled in from the profile; any
-        'id_col'/'layer_name' field set explicitly in the config is left untouched.
+        'id_col'/'layer_name'/'valid_vpus' field (or, for 'valid_vpus', domain key) set
+        explicitly in the config is left untouched.
 
         Returns a new mapping rather than mutating `values` in place: pydantic does not
         guarantee a defensive copy of a nested model's input dict before handing it to a
@@ -328,7 +361,7 @@ class BaseGeneralConfig(BaseModel):
         profile = get_profile(profile_name)
         values = dict(values)
 
-        for section in ("id_col", "layer_name"):
+        for section in ("id_col", "layer_name", "valid_vpus"):
             profile_section = profile.get(section)
             if not profile_section:
                 continue
@@ -372,18 +405,23 @@ class BaseGeneralConfig(BaseModel):
 
     @model_validator(mode="after")
     def check_vpu(self) -> "BaseGeneralConfig":
-        """Ensure that the VPU is valid."""
-        # fmt: off
-        valid_vpus = {
-            "conus": [
-                "01", "02", "03N", "03S", "03W", "04", "05", "06", "07", "08", "09",
-                "10L", "10U", "11", "12", "13", "14", "15", "16", "17", "18",
-            ],
-            "ak": ["19"],
-            "hi": ["20"],
-            "prvi": ["21"],
-        }
-        # fmt: on
+        """Ensure that the domain is known and the VPU is valid for that domain."""
+        # Extend (union), not replace: a domain present in both DEFAULT_VALID_VPUS and
+        # self.valid_vpus keeps its built-in codes plus any new ones from the override, so
+        # adding a VPU to an existing domain can't silently drop the rest of its codes.
+        valid_vpus = dict(DEFAULT_VALID_VPUS)
+        for domain, vpus in (self.valid_vpus or {}).items():
+            existing = valid_vpus.get(domain, [])
+            valid_vpus[domain] = list(existing) + [v for v in vpus if v not in existing]
+
+        if self.domain not in valid_vpus:
+            msg = (
+                f"Unknown domain '{self.domain}'. Known domains are: {sorted(valid_vpus)}. "
+                "To use a different domain or partitioning scheme, set 'general.valid_vpus' "
+                "to map it to its list of valid VPU codes."
+            )
+            logger.error(msg)
+            raise ValueError(msg)
 
         if self.vpu not in valid_vpus[self.domain]:
             msg = f"Invalid VPU '{self.vpu}' for domain '{self.domain}'. Valid options are: {valid_vpus[self.domain]}"

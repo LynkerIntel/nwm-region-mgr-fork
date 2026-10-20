@@ -23,7 +23,12 @@ from pathlib import Path
 
 from mswm.build_inputs import RealizationBuilder
 
-from nwm_region_mgr.ngen.config_schema import TIMESTAMP_FMT, TIMESTAMP_FMT1
+from nwm_region_mgr.ngen.config_schema import (
+    DEFAULT_FORCING_SOURCE_MAP,
+    DEFAULT_NGEN_DOMAIN_MAP,
+    TIMESTAMP_FMT,
+    TIMESTAMP_FMT1,
+)
 from nwm_region_mgr.utils import BaseConfigProcessor
 
 logger = logging.getLogger(__name__)
@@ -108,25 +113,26 @@ class NgenSimulationProcessor(BaseConfigProcessor):
 
         # global_domain for ngen-forcing
         domain_map = {
-            "conus": "CONUS",
-            "ak": "Alaska",
-            "hi": "Hawaii",
-            "prvi": "Puerto_Rico",
-            "gl": "gl",
+            **DEFAULT_NGEN_DOMAIN_MAP,
+            **(self.config.general.ngen_domain_map or {}),
+        }
+        forcing_map = {
+            **DEFAULT_FORCING_SOURCE_MAP,
+            **(self.config.general.forcing_source_map or {}),
         }
 
         domain = self.config.general.domain.lower()
 
-        try:
-            general_domain = domain_map[domain].lower()
-            # forcing_domain = domain_map[domain]
-        except KeyError:
+        if domain not in domain_map:
             raise ValueError(
-                f"Unsupported domain: {domain}. "
-                f"Supported options: {', '.join(domain_map.keys())}."
+                f"Unsupported domain for NGEN simulation: '{domain}'. Known domains are: "
+                f"{sorted(domain_map)}. To run an NGEN simulation for a different domain, "
+                "set 'general.ngen_domain_map' to map it to the NGEN-forcing pipeline's "
+                "domain name."
             )
+        general_domain = domain_map[domain].lower()
 
-        forcing_source = "aorc" if domain == "conus" else "nwm"
+        forcing_source = forcing_map.get(domain, "nwm")
 
         # Replace placeholders in the template
         format_values = {

@@ -25,6 +25,23 @@ logger = logging.getLogger(__name__)
 TIMESTAMP_FMT = "%Y-%m-%dT%H:%M:%S"
 TIMESTAMP_FMT1 = "%Y-%m-%d %H:%M:%S"
 
+# Built-in mapping of domain name -> the ngen-forcing pipeline's domain name, used to build
+# the MSWM config template. Override or extend via NgenGeneralSettings.ngen_domain_map for a
+# domain not already known here (e.g., one added via general.valid_vpus).
+DEFAULT_NGEN_DOMAIN_MAP: Dict[str, str] = {
+    "conus": "CONUS",
+    "ak": "Alaska",
+    "hi": "Hawaii",
+    "prvi": "Puerto_Rico",
+    "gl": "gl",
+}
+
+# Built-in mapping of domain name -> NGEN forcing source. A domain not listed here defaults
+# to 'nwm' (matching this package's long-standing default), so only 'conus' needs an entry.
+DEFAULT_FORCING_SOURCE_MAP: Dict[str, str] = {
+    "conus": "aorc",
+}
+
 
 def validate_timestamp(value: str) -> str:
     """Validate that the given string matches one of the supported timestamp formats."""
@@ -76,6 +93,29 @@ class NgenGeneralSettings(BaseGeneralConfig):
         default="default_mswm_template.txt",
         description="Path to the MSWM configuration template file for NGEN simulation.",
         examples=["default_mswm_template.txt"],
+    )
+
+    ngen_domain_map: Dict[str, str] | None = Field(
+        description=(
+            "Optional extension of the mapping from domain name to the NGEN-forcing "
+            "pipeline's domain name (DEFAULT_NGEN_DOMAIN_MAP), used to build the MSWM "
+            "config template. For a domain name also present in the built-in mapping, the "
+            "value here replaces it; a new domain name adds an entry. Set this to run an "
+            "NGEN simulation for a domain not already known to this package (e.g., one "
+            "added via general.valid_vpus)."
+        ),
+        examples={"gl": "Great_Lakes"},
+        default=None,
+    )
+
+    forcing_source_map: Dict[str, str] | None = Field(
+        description=(
+            "Optional extension of the mapping from domain name to NGEN forcing source "
+            "('aorc' or 'nwm'). Domains not listed here (directly or via "
+            "DEFAULT_FORCING_SOURCE_MAP) default to 'nwm'."
+        ),
+        examples={"gl": "nwm"},
+        default=None,
     )
 
     # validate timestamp fields

@@ -4,6 +4,12 @@ This module provides functions to select formulations based on summary scores of
 as well as formulation costs if provided in the configuration.
 
 Functions:
+    - _validate_nested_huc_ids: Validate that the configured 'huc12' id column holds nested
+      numeric HUC codes before relying on string-prefix truncation to find coarser spatial units.
+    - _normalize_numeric_huc_artifacts: Repair numeric-dtype artifacts (lost leading zeros,
+      trailing '.0') in the 'huc12' id column before the above validation.
+    - _compute_huc_id_column: Derive the spatial-unit ID at a given digit width from the
+      'huc12' id column, without truncating a hydrofabric's own native/finest-level ID.
     - _get_gages_with_shared_formulations: Identify the formulations shared by a number of gages.
     - _find_gages_nearest_neighbor: Find gages for a given HUC ID using the nearest neighbor method.
     - _find_gages_upscaling: Find gages for a given HUC ID using the upscaling method.
@@ -20,6 +26,7 @@ Functions:
 """
 
 import logging
+import re
 from itertools import combinations
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -37,6 +44,103 @@ from nwm_region_mgr.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+# True USGS Watershed Boundary Dataset HUC12 codes are 12-digit numeric strings, where a
+# coarser unit's ID (e.g. HUC8) is the leading-digit prefix of its children's HUC12 IDs. The
+# "upscaling" basin_fill_method, and any 'huc_level' coarser than the finest/native level,
+# rely on that nesting to find a parent spatial unit by truncating the ID string.
+_NESTED_HUC_ID_PATTERN = re.compile(r"^\d{12}$")
+
+
+def _validate_nested_huc_ids(huc12_values: pd.Series, huc12_col: str) -> None:
+    """Validate that `huc12_col` values look like nested, 12-digit numeric HUC codes.
+
+    Called only when truncating the configured 'huc12' id column to a coarser spatial unit
+    (i.e., spatial_unit.basin_fill_method == 'upscaling', or 'huc_level' finer than huc12).
+    If the hydrofabric's id_col.huc12 column doesn't follow the nested numeric-prefix
+    convention, truncating it produces spatial groupings with no real geographic meaning.
+    Raising here surfaces that mismatch immediately instead of silently mis-grouping basins.
+
+    Args:
+        huc12_values: Values of the configured 'huc12' id column.
+        huc12_col: Name of that column, for the error message.
+
+    Raises:
+        ValueError: If any non-null value does not match a 12-digit numeric string.
+
+    """
+    values = huc12_values.dropna().astype(str)
+    if values.empty:
+        return
+
+    non_conforming = values[~values.str.match(_NESTED_HUC_ID_PATTERN)]
+    if not non_conforming.empty:
+        examples = sorted(non_conforming.unique())[:5]
+        raise ValueError(
+            f"spatial_unit.basin_fill_method='upscaling' (or a 'huc_level' coarser than the "
+            f"hydrofabric's native/finest spatial unit) requires the '{huc12_col}' column "
+            f"(general.id_col.huc12) to contain nested 12-digit numeric HUC codes, following "
+            "the USGS Watershed Boundary Dataset convention where a coarser unit's ID is the "
+            f"digit-prefix of its children's IDs. Found values that don't match, e.g.: "
+            f"{examples}. If this hydrofabric does not use nested HUC-style IDs, map "
+            "general.id_col.huc12 to the hydrofabric's own atomic spatial-unit ID column, set "
+            "spatial_unit.huc_level to that same (finest) level so no truncation is needed, "
+            "and set spatial_unit.basin_fill_method='nearest-neighbor', which does not require "
+            "nested IDs."
+        )
+
+
+def _normalize_numeric_huc_artifacts(huc12_values: pd.Series) -> pd.Series:
+    """Repair common numeric-dtype artifacts in a 'huc12' id column before HUC validation.
+
+    A HUC12 code is sometimes stored upstream (e.g. in a parquet file) as a numeric dtype
+    rather than string. Read back as text, that silently drops leading zeros (int -> e.g.
+    '10100020101', 11 digits instead of 12) or appends a trailing '.0' (float -> e.g.
+    '10100020101.0'). Left uncorrected, a genuinely nested HUC12 column would be misdiagnosed
+    by _validate_nested_huc_ids as not following the HUC12 convention, purely because of its
+    source dtype. Strips a trailing '.0', and zero-pads a purely numeric value shorter than
+    12 digits back to 12 digits; any value that isn't purely numeric (i.e., not this specific
+    artifact) is left untouched, as are null entries.
+
+    Args:
+        huc12_values: Values of the configured 'huc12' id column.
+
+    Returns:
+        A new Series with the same index, numeric-dtype artifacts repaired.
+
+    """
+    not_null = huc12_values.notna()
+    values = huc12_values.astype(str).str.replace(r"\.0$", "", regex=True)
+
+    needs_padding = (
+        not_null & values.str.fullmatch(r"\d+").fillna(False) & (values.str.len() < 12)
+    )
+    values = values.where(~needs_padding, values.str.zfill(12))
+
+    return values.where(not_null, huc12_values)
+
+
+def _compute_huc_id_column(huc12_values: pd.Series, huc_digit: int) -> pd.Series:
+    """Derive the spatial-unit ID at `huc_digit` digits from the configured 'huc12' id column.
+
+    huc_digit >= 12 (the finest configurable level) is a true no-op: the hydrofabric's native
+    'huc12' id is used as-is, not truncated to exactly 12 characters. Truncating it would
+    silently collide two different divides that happen to share the same 12-character prefix,
+    for a hydrofabric whose native ID is longer than 12 characters (e.g., a custom hydrofabric
+    using the huc_level='huc12' + basin_fill_method='nearest-neighbor' escape hatch described
+    on FormulationSpatialUnitConfig.huc_level).
+
+    Args:
+        huc12_values: Values of the configured 'huc12' id column.
+        huc_digit: Number of leading characters to keep (derived from spatial_unit.huc_level).
+
+    Returns:
+        A new Series of the resulting spatial-unit IDs, as strings.
+
+    """
+    if huc_digit >= 12:
+        return huc12_values.astype(str)
+    return huc12_values.str[:huc_digit]
 
 
 def _get_gages_with_shared_formulations(
@@ -642,9 +746,28 @@ def select_formulation_all(
     # get spatial units for formulation selection
     huc_level = config.spatial_unit.huc_level.lower().replace("-", "").replace("_", "")
     huc_digit = int(huc_level.replace("huc", ""))
+    basin_fill_method = config.spatial_unit.basin_fill_method.lower()
 
-    # add huc_id column to cwt_divide_huc12 based on huc_digit
-    cwt_divide_huc12["huc_id"] = cwt_divide_huc12[huc12_col].str[:huc_digit]
+    # validate the nested-HUC-ID assumption up front, but only when it's actually relied on:
+    # 'upscaling' truncates huc12_col at progressively coarser levels regardless of huc_level
+    # (see _find_gages_upscaling), and any huc_level finer than the hydrofabric's native/finest
+    # spatial unit (huc_digit < 12) truncates it once below.
+    if basin_fill_method == "upscaling" or huc_digit < 12:
+        # repair common numeric-dtype artifacts (e.g. huc12_col stored as float64/int64
+        # upstream) before validating, so a genuinely nested HUC12 column isn't misdiagnosed
+        # as non-conforming purely because of its source dtype. Only applied when the nested-
+        # HUC interpretation is actually in use, so a custom hydrofabric's genuinely short
+        # native numeric IDs (used via the huc_level='huc12' no-truncation case below) are
+        # never rewritten.
+        cwt_divide_huc12[huc12_col] = _normalize_numeric_huc_artifacts(
+            cwt_divide_huc12[huc12_col]
+        )
+        _validate_nested_huc_ids(cwt_divide_huc12[huc12_col], huc12_col)
+
+    # add huc_id column to cwt_divide_huc12 based on huc_digit (see _compute_huc_id_column)
+    cwt_divide_huc12["huc_id"] = _compute_huc_id_column(
+        cwt_divide_huc12[huc12_col], huc_digit
+    )
 
     # make sure type of huc_id column is string
     if not pd.api.types.is_string_dtype(cwt_divide_huc12["huc_id"]):
