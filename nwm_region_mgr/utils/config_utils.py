@@ -37,6 +37,7 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from nwm_region_mgr.utils.dict_utils import flatten_dict
+from nwm_region_mgr.utils.hydrofabric_profiles import get_profile
 from nwm_region_mgr.utils.io_utils import read_table, save_data
 from nwm_region_mgr.utils.plot_utils import plot_histogram, plot_spatial_map
 from nwm_region_mgr.utils.string_utils import recursive_substitute
@@ -257,6 +258,18 @@ class BaseGeneralConfig(BaseModel):
         default="summary_score",
     )
 
+    hydrofabric_profile: str | None = Field(
+        description=(
+            "Optional name of a built-in hydrofabric profile (see "
+            "nwm_region_mgr.utils.hydrofabric_profiles.HYDROFABRIC_PROFILES) to seed default "
+            "values for 'id_col' and 'layer_name'. Any 'id_col'/'layer_name' field set explicitly "
+            "in this config always takes precedence over the profile's value for that field. "
+            "If None, 'id_col' and 'layer_name' use their own built-in defaults, as before."
+        ),
+        examples="nwm_ngen_hfv2.2",
+        default=None,
+    )
+
     id_col: FieldCrosswalk = Field(
         description="Dictionary mapping column names for unique identifiers in all applicable files.",
         examples={
@@ -290,6 +303,45 @@ class BaseGeneralConfig(BaseModel):
         },
         default_factory=LoggingConfig,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_hydrofabric_profile(cls, values: Any) -> Any:
+        """Seed 'id_col'/'layer_name' defaults from a named 'hydrofabric_profile', if set.
+
+        Only keys the user did not already specify are filled in from the profile; any
+        'id_col'/'layer_name' field set explicitly in the config is left untouched.
+
+        Returns a new mapping rather than mutating `values` in place: pydantic does not
+        guarantee a defensive copy of a nested model's input dict before handing it to a
+        `mode="before"` validator, so mutating it directly can leak seeded keys back into a
+        dict object the caller still holds (e.g. a config-building helper that re-validates
+        the same underlying `general` dict with a different profile).
+        """
+        if not isinstance(values, dict):
+            return values
+
+        profile_name = values.get("hydrofabric_profile")
+        if not profile_name:
+            return values
+
+        profile = get_profile(profile_name)
+        values = dict(values)
+
+        for section in ("id_col", "layer_name"):
+            profile_section = profile.get(section)
+            if not profile_section:
+                continue
+
+            user_section = values.get(section)
+            if user_section is None:
+                values[section] = dict(profile_section)
+            elif isinstance(user_section, dict):
+                values[section] = {**profile_section, **user_section}
+            # if the user passed something other than a dict (e.g. a pre-built
+            # FieldCrosswalk/LayerCrosswalk instance), leave it untouched
+
+        return values
 
     @model_validator(mode="after")
     def normalize_hydrofabric_file(self) -> "BaseGeneralConfig":

@@ -14,6 +14,10 @@ from nwm_region_mgr.utils.dict_utils import (
     flatten_dict,
     remove_nulls,
 )
+from nwm_region_mgr.utils.hydrofabric_profiles import (
+    HYDROFABRIC_PROFILES,
+    get_profile,
+)
 from nwm_region_mgr.utils.hydrofabric_utils import (
     area_weighted_average,
     dissolve_polygons,
@@ -41,6 +45,8 @@ __all__ = [
     "LoggingConfig",
     "FieldCrosswalk",
     "LayerCrosswalk",
+    "HYDROFABRIC_PROFILES",
+    "get_profile",
     "remove_nulls",
     "convert_enum_to_value",
     "flatten_dict",
